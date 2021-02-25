@@ -344,7 +344,7 @@ examples:\n\
                     self.arguments.append(newarg)
             else:
                 self.arguments.append(arg)
-        
+
         if len(arguments) == 0:
             self.printUsage()
             print 'For more information, run "usdzconvert -h"'
@@ -526,7 +526,7 @@ def findUsdMaterial(params, name):
     if name in params.usdMaterials:
         return params.usdMaterials[name]
 
-    # try to find by material name 
+    # try to find by material name
     materialName = usdUtils.makeValidIdentifier(name)
     if materialName in params.usdMaterialsByName:
         return params.usdMaterialsByName[materialName]
@@ -839,14 +839,15 @@ def process(argumentList):
     print 'Output file:', dstPath
 
     arkitCheckerReturn = 0
-    if dstIsUsdz:
-        # ARKit checker code
-        usdcheckerArgs = [dstPath]
-        if parserOut.verbose:
-            usdcheckerArgs.append('-v')
-        scriptFolder = os.path.dirname(os.path.realpath(__file__))
-        usdARKitChecker = imp.load_source('main', scriptFolder + '/usdARKitChecker')
-        arkitCheckerReturn = usdARKitChecker.main(usdcheckerArgs)
+    # We do NOT want to use the `usdchecker`
+    # if dstIsUsdz:
+    #     # ARKit checker code
+    #     usdcheckerArgs = [dstPath]
+    #     if parserOut.verbose:
+    #         usdcheckerArgs.append('-v')
+    #     scriptFolder = os.path.dirname(os.path.realpath(__file__))
+    #     usdARKitChecker = imp.load_source('main', scriptFolder + '/usdARKitChecker')
+    #     arkitCheckerReturn = usdARKitChecker.main(usdcheckerArgs)
 
     return arkitCheckerReturn
 
