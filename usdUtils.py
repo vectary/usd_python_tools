@@ -13,11 +13,11 @@ class ConvertExit(Exception):
 
 
 def printError(message):
-    print '  \033[91m' + 'Error:', message + '\033[0m'
+    print('  \033[91m' + 'Error: ' + message + '\033[0m')
 
 
 def printWarning(message):
-    print '  \033[93m' + 'Warning:', message + '\033[0m'
+    print('  \033[93m' + 'Warning: ' + message + '\033[0m')
 
 
 def makeValidIdentifier(path):
@@ -50,7 +50,7 @@ def getIndexByChannel(channel):
 
 def copy(srcFile, dstFile, verbose=False):
     if verbose:
-        print 'Copying file:', srcFile, dstFile
+        print('Copying file: ' + srcFile + ' ' + dstFile)
     if os.path.isfile(srcFile):
         dstFolder = os.path.dirname(dstFile)
         if dstFolder != '' and not os.path.isdir(dstFolder):
@@ -313,7 +313,8 @@ class Material:
         matPath = str(usdMaterial.GetPath())
         surfaceShader = UsdShade.Shader.Define(usdStage, matPath + '/surfaceShader')
         surfaceShader.CreateIdAttr('UsdPreviewSurface')
-        usdMaterial.CreateOutput('surface', Sdf.ValueTypeNames.Token).ConnectToSource(surfaceShader, 'surface')
+        surfaceOutput = surfaceShader.CreateOutput('surface', Sdf.ValueTypeNames.Token)
+        usdMaterial.CreateOutput('surface', Sdf.ValueTypeNames.Token).ConnectToSource(surfaceOutput)
         if self.opacityThreshold is not None:
             surfaceShader.CreateInput('opacityThreshold', Sdf.ValueTypeNames.Float).Set(float(self.opacityThreshold))
         return surfaceShader
@@ -370,7 +371,7 @@ class Material:
             transformShader = UsdShade.Shader.Define(usdStage, transformShaderPath)
             transformShader.SetSdrMetadataByKey("role", "math")
             transformShader.CreateIdAttr('UsdTransform2d')
-            transformShader.CreateInput('in', Sdf.ValueTypeNames.Float2).ConnectToSource(uvReader, 'result')
+            transformShader.CreateInput('in', Sdf.ValueTypeNames.Float2).ConnectToSource(uvReader.GetOutput('result'))
 
             if map.transform.translation[0] != 0 or map.transform.translation[1] != 0:
                 transformShader.CreateInput('translation', Sdf.ValueTypeNames.Float2).Set(Gf.Vec2f(map.transform.translation[0], map.transform.translation[1]))
@@ -379,6 +380,7 @@ class Material:
             if map.transform.rotation != 0:
                 transformShader.CreateInput('rotation', Sdf.ValueTypeNames.Float).Set(float(map.transform.rotation))
 
+            transformShader.CreateOutput('result', Sdf.ValueTypeNames.Float2)
             uvReader = transformShader
 
         # create texture shader node
@@ -414,7 +416,7 @@ class Material:
             printWarning('texture file ' + map.file + ' is not .png or .jpg')
 
         textureShader.CreateInput('file', Sdf.ValueTypeNames.Asset).Set(map.file)
-        textureShader.CreateInput('st', Sdf.ValueTypeNames.Float2).ConnectToSource(uvReader, 'result')
+        textureShader.CreateInput('st', Sdf.ValueTypeNames.Float2).ConnectToSource(uvReader.GetOutput('result'))
         dataType = Sdf.ValueTypeNames.Float3 if len(channels) == 3 else Sdf.ValueTypeNames.Float
         textureShader.CreateOutput(channels, dataType)
 
@@ -502,7 +504,7 @@ class Material:
                 uvInput.Set(map.texCoordSet)
             matPath = str(usdMaterial.GetPath())
             textureShader = self._makeUsdUVTexture(matPath, map, inputName, channels, uvInput, usdStage)
-            surfaceShader.CreateInput(inputName, inputType).ConnectToSource(textureShader, channels)
+            surfaceShader.CreateInput(inputName, inputType).ConnectToSource(textureShader.GetOutput(channels))
         elif isinstance(input, list):
             gfVec3d = Gf.Vec3d(float(input[0]), float(input[1]), float(input[2]))
             surfaceShader.CreateInput(inputName, inputType).Set(gfVec3d)

@@ -1,20 +1,26 @@
 from pxr import *
 import os, os.path
-import numpy
 import re
 import usdUtils
 import math
+import sys
 
-
-import imp
 
 usdStageWithFbxLoaded = True
 try:
-    imp.find_module('fbx')
     import fbx
 except ImportError:
-    usdUtils.printError("Failed to import fbx module. Please install FBX Python bindings from http://www.autodesk.com/fbx and add path to FBX Python SDK to your PYTHONPATH")
+    usdUtils.printError("Failed to import fbx module. Please install FBX Python SDK from http://www.autodesk.com/fbx and add path to folder with .so/.pyd files to your PYTHONPATH")
     usdStageWithFbxLoaded = False
+
+
+def fbxObjectHash(object):
+    return id(object)
+
+if sys.version_info.major == 3 and usdStageWithFbxLoaded:
+    # FbxNode and FbxSkin in Python 3 have no __hash__ method, which is used as dictionary key
+    fbx.FbxNode.__hash__ = fbxObjectHash
+    fbx.FbxSkin.__hash__ = fbxObjectHash
 
 
 class ConvertError(Exception):
@@ -91,7 +97,7 @@ class FbxNodeManager(usdUtils.NodeManager):
 
     def overrideGetChildren(self, fbxNode):
         children = []
-        for childIdx in xrange(fbxNode.GetChildCount()):
+        for childIdx in range(fbxNode.GetChildCount()):
             children.append(fbxNode.GetChild(childIdx))
         return children
 
@@ -118,11 +124,11 @@ class AnimProperty:
 
 
 class FbxConverter:
-    def __init__(self, fbxPath, usdPath, legacyModifier, copyTextures, searchPaths, verbose):
-        self.verbose = verbose
+    def __init__(self, fbxPath, usdPath, legacyModifier, openParameters):
         self.legacyModifier = legacyModifier
-        self.copyTextures = copyTextures
-        self.searchPaths = searchPaths
+        self.copyTextures = openParameters.copyTextures
+        self.searchPaths = openParameters.searchPaths
+        self.verbose = openParameters.verbose
         self.asset = usdUtils.Asset(usdPath)
         self.usdStage = None
         self.usdMaterials = {}
@@ -146,8 +152,15 @@ class FbxConverter:
         self.dstFolder = usdPath[:len(usdPath)-len(filenameFull)]
 
         self.loadFbxScene(fbxPath)
-        self.fps = fbx.FbxTime.GetFrameRate(fbx.FbxTime.GetGlobalTimeMode())
+        self.fps = fbx.FbxTime.GetFrameRate(self.fbxScene.GetGlobalSettings().GetTimeMode())
         self.asset.setFPS(self.fps)
+
+        systemUnit = self.fbxScene.GetGlobalSettings().GetSystemUnit()
+        if systemUnit == fbx.FbxSystemUnit.cm: # cm is default for USD and FBX
+            openParameters.metersPerUnit = 0.01
+        else:
+            fbxMetersPerUnit = 0.01
+            openParameters.metersPerUnit = systemUnit.GetScaleFactor() * fbxMetersPerUnit
 
         self.nodeManager = FbxNodeManager()
         self.skinning = usdUtils.Skinning(self.nodeManager)
@@ -313,7 +326,7 @@ class FbxConverter:
         animStacksCount = self.fbxScene.GetSrcObjectCount(fbx.FbxCriteria.ObjectType(fbx.FbxAnimStack.ClassId))
         if animStacksCount < 1:
             if self.verbose:
-                print 'No animation found'
+                print('No animation found')
             return
 
         fbxAnimStack = self.fbxScene.GetSrcObject(fbx.FbxCriteria.ObjectType(fbx.FbxAnimStack.ClassId), 0)
@@ -344,7 +357,7 @@ class FbxConverter:
 
     def getVec3fArrayWithLayerElements(self, elements, fbxLayerElements):
         elementsArray = fbxLayerElements.GetDirectArray()
-        for i in xrange(elementsArray.GetCount()):
+        for i in range(elementsArray.GetCount()):
             element = elementsArray.GetAt(i)
             elements.append(Gf.Vec3f(element[0], element[1], element[2]))
 
@@ -359,19 +372,19 @@ class FbxConverter:
         indices = []
         if mappingMode == fbx.FbxLayerElement.eByControlPoint:
             if indexToDirect:
-                for contorlPointIdx in xrange(fbxMesh.GetControlPointsCount()):
+                for contorlPointIdx in range(fbxMesh.GetControlPointsCount()):
                     indices.append(fbxLayerElements.GetIndexArray().GetAt(contorlPointIdx))
         elif mappingMode == fbx.FbxLayerElement.eByPolygonVertex:
             pointIdx = 0
-            for polygonIdx in xrange(fbxMesh.GetPolygonCount()):
-                for vertexIdx in xrange(fbxMesh.GetPolygonSize(polygonIdx)):
+            for polygonIdx in range(fbxMesh.GetPolygonCount()):
+                for vertexIdx in range(fbxMesh.GetPolygonSize(polygonIdx)):
                     if indexToDirect:
                         indices.append(fbxLayerElements.GetIndexArray().GetAt(pointIdx))
                     else:
                         indices.append(pointIdx)
                     pointIdx += 1
         elif mappingMode == fbx.FbxLayerElement.eByPolygon:
-            for polygonIdx in xrange(fbxMesh.GetPolygonCount()):
+            for polygonIdx in range(fbxMesh.GetPolygonCount()):
                 if indexToDirect:
                     indices.append(fbxLayerElements.GetIndexArray().GetAt(polygonIdx))
                 else:
@@ -395,7 +408,7 @@ class FbxConverter:
 
 
     def processNormals(self, fbxMesh, usdMesh, vertexIndices):
-        for layerIdx in xrange(fbxMesh.GetLayerCount()):
+        for layerIdx in range(fbxMesh.GetLayerCount()):
             fbxLayerNormals = fbxMesh.GetLayer(layerIdx).GetNormals()
             if fbxLayerNormals is None:
                 continue
@@ -415,14 +428,14 @@ class FbxConverter:
 
 
     def processUVs(self, fbxMesh, usdMesh, vertexIndices):
-        for layerIdx in xrange(fbxMesh.GetLayerCount()):
+        for layerIdx in range(fbxMesh.GetLayerCount()):
             fbxLayerUVs = fbxMesh.GetLayer(layerIdx).GetUVs() # get diffuse texture uv-s
             if fbxLayerUVs is None:
                 continue
 
             uvs = []
             uvArray = fbxLayerUVs.GetDirectArray()
-            for i in xrange(uvArray.GetCount()):
+            for i in range(uvArray.GetCount()):
                 uv = uvArray.GetAt(i)
                 uvs.append(Gf.Vec2f(uv[0], uv[1]))
             if not any(uvs):
@@ -448,14 +461,14 @@ class FbxConverter:
 
 
     def processVertexColors(self, fbxMesh, usdMesh, vertexIndices):
-        for layerIdx in xrange(fbxMesh.GetLayerCount()):
+        for layerIdx in range(fbxMesh.GetLayerCount()):
             fbxLayerColors = fbxMesh.GetLayer(layerIdx).GetVertexColors()
             if fbxLayerColors is None:
                 continue
 
             colors = []
             colorArray = fbxLayerColors.GetDirectArray()
-            for i in xrange(colorArray.GetCount()):
+            for i in range(colorArray.GetCount()):
                 fbxColor = colorArray.GetAt(i)
                 colors.append(Gf.Vec3f(fbxColor.mRed, fbxColor.mGreen, fbxColor.mBlue))
             if not any(colors):
@@ -550,7 +563,7 @@ class FbxConverter:
 
 
     def bindMaterials(self, fbxMesh, usdMesh):
-        for layerIdx in xrange(fbxMesh.GetLayerCount()):
+        for layerIdx in range(fbxMesh.GetLayerCount()):
             fbxLayerMaterials = fbxMesh.GetLayer(layerIdx).GetMaterials()
             if not fbxLayerMaterials:
                 continue
@@ -574,7 +587,7 @@ class FbxConverter:
                         materialName = usdUtils.makeValidIdentifier(fbxMaterial.GetName())
                         subsetName = materialName + '_subset'
                         if self.verbose:
-                            print '  subset:', subsetName, 'faces:', facesCount
+                            print('  subset: ' + subsetName + ' faces: ' + str(facesCount))
                         usdSubset = UsdShade.MaterialBindingAPI.CreateMaterialBindSubset(bindingAPI, subsetName, Vt.IntArray(subsets[materialIndex]))
                         usdMaterial = self.usdMaterials[fbxMaterial.GetName()]
                         UsdShade.MaterialBindingAPI(usdSubset).Bind(usdMaterial)
@@ -583,7 +596,8 @@ class FbxConverter:
                 fbxMaterial = fbxLayerMaterials.GetDirectArray().GetAt(0)
                 if fbxMaterial is not None and fbxMaterial.GetName() in self.usdMaterials:
                     usdMaterial = self.usdMaterials[fbxMaterial.GetName()]
-                    UsdShade.Material.Bind(usdMaterial, usdMesh.GetPrim())
+                    #UsdShade.Material.Bind(usdMaterial, usdMesh.GetPrim())
+                    UsdShade.MaterialBindingAPI(usdMesh.GetPrim()).Bind(usdMaterial)
 
 
     def getFbxMesh(self, fbxNode):
@@ -621,10 +635,10 @@ class FbxConverter:
 
         indices = []
         faceVertexCounts = []
-        for polygonIdx in xrange(fbxMesh.GetPolygonCount()):
+        for polygonIdx in range(fbxMesh.GetPolygonCount()):
             polygonSize = fbxMesh.GetPolygonSize(polygonIdx)
             faceVertexCounts.append(polygonSize)
-            for polygonVertexIdx in xrange(polygonSize):
+            for polygonVertexIdx in range(polygonSize):
                 index = fbxMesh.GetPolygonVertex(polygonIdx, polygonVertexIdx)
                 indices.append(index)
         usdMesh.CreateFaceVertexCountsAttr(faceVertexCounts)
@@ -648,7 +662,7 @@ class FbxConverter:
                 type = 'Skinned mesh'
             elif underSkeleton is not None:
                 type = 'Rigid skinned mesh'
-            print indent + type + ': ' + fbxNode.GetName()
+            print(indent + type + ': ' + fbxNode.GetName())
 
         self.bindMaterials(fbxMesh, usdMesh)
 
@@ -784,14 +798,14 @@ class FbxConverter:
 
         if framesCount == 1:
             if self.verbose:
-                print '  no skeletal animation'
+                print('  no skeletal animation')
             return
 
         animationName = self.asset.getAnimationsPath() + '/' + 'SkelAnimation'
         if skeletonIdx > 0:
             animationName += '_' + str(skeletonIdx)
         if self.verbose:
-            print 'Animation:', animationName
+            print('Animation: ' + animationName)
 
         usdSkelAnim = UsdSkel.Animation.Define(self.usdStage, animationName)
         translateAttr = usdSkelAnim.CreateTranslationsAttr()
@@ -859,7 +873,7 @@ class FbxConverter:
             isScale = True
         else:
             if self.verbose:
-                print 'Warnig: animation channel"', channelName, '"is not supported.'
+                print('Warnig: animation channel "' + channelName + '" is not supported.')
 
         fbxAnimEvaluator = self.fbxScene.GetAnimationEvaluator()
         # TODO: for linear curves use key frames only
@@ -943,7 +957,7 @@ class FbxConverter:
                 if skeleton is not None:
                     skeleton.makeUsdSkeleton(self.usdStage, newPath, self.nodeManager)
                     if self.verbose:
-                        print indent + "SkelRoot:", nodeName
+                        print(indent + "SkelRoot: " + nodeName)
                     underSkeleton = skeleton
 
         if underSkeleton and self.getFbxMesh(fbxNode) is not None:
@@ -986,7 +1000,7 @@ class FbxConverter:
         if underSkeleton is not None:
             newPath = path # keep meshes directly under SkelRoot scope
 
-        for childIdx in xrange(fbxNode.GetChildCount()):
+        for childIdx in range(fbxNode.GetChildCount()):
             self.processNode(fbxNode.GetChild(childIdx), newPath, underSkeleton, indent + '  ')
 
 
@@ -997,7 +1011,7 @@ class FbxConverter:
             if fbx.FbxNodeAttribute.eSkeleton == fbxAttributeType:
                 if fbxNodeAttribute.IsSkeletonRoot():
                     self.skinning.createSkeleton(fbxNode)
-        for childIdx in xrange(fbxNode.GetChildCount()):
+        for childIdx in range(fbxNode.GetChildCount()):
             self.populateSkeletons(fbxNode.GetChild(childIdx))
 
 
@@ -1037,7 +1051,7 @@ class FbxConverter:
                     self.skinning.skins.append(skin)
                     self.fbxSkinToSkin[fbxSkin] = skin
 
-        for childIdx in xrange(fbxNode.GetChildCount()):
+        for childIdx in range(fbxNode.GetChildCount()):
             self.populateSkins(fbxNode.GetChild(childIdx))
 
 
@@ -1047,11 +1061,11 @@ class FbxConverter:
         self.skinning.createSkeletonsFromSkins()
         if self.verbose:
             if len(self.skinning.skeletons) > 0:
-                print "  Found skeletons:", len(self.skinning.skeletons), "with", len(self.skinning.skins), "skin(s)"
+                print("  Found skeletons: " + str(len(self.skinning.skeletons)) + " with " + str(len(self.skinning.skins)) + " skin(s)")
 
 
     def processSkinnedMeshes(self):
-        for fbxNode, skeleton in self.skeletonByNode.iteritems():
+        for fbxNode, skeleton in self.skeletonByNode.items():
             fbxSkin = self.getFbxSkin(fbxNode)
             if skeleton is None:
                 if fbxSkin is None:
@@ -1081,7 +1095,7 @@ class FbxConverter:
 
 
     def processBlendShapes(self):
-        for fbxNode, blendShape in self.blendShapeByNode.iteritems():
+        for fbxNode, blendShape in self.blendShapeByNode.items():
             nodeName = usdUtils.makeValidIdentifier(fbxNode.GetName().split(":")[-1])
             newPath = blendShape.sdfPath + '/' + nodeName
             if newPath in self.nodePaths:
@@ -1099,7 +1113,7 @@ class FbxConverter:
             blendShapes = []
             blendShapeTargets = []
 
-            index = 0;
+            index = 0
             fbxBlendShape = self.getFbxBlenShape(fbxNode)
             for i in range(fbxBlendShape.GetBlendShapeChannelCount()):
                 fbxBlendShapeChannel = fbxBlendShape.GetBlendShapeChannel(i)
@@ -1130,7 +1144,7 @@ class FbxConverter:
             usdSkelBlendShapeBinding.CreateBlendShapesAttr(blendShapes)
             usdSkelBlendShapeBinding.CreateBlendShapeTargetsRel().SetTargets(blendShapeTargets)
 
-            UsdSkel.BindingAPI.Apply(usdMesh.GetPrim());
+            UsdSkel.BindingAPI.Apply(usdMesh.GetPrim())
 
             blendShape.addBlendShapeList(blendShapes)
 
@@ -1143,14 +1157,14 @@ class FbxConverter:
             return
 
         blendShapeIdx = 0
-        for fbxNode, blendShape in self.blendShapeByNode.iteritems():
+        for fbxNode, blendShape in self.blendShapeByNode.items():
             fbxBlendShape = self.getFbxBlenShape(fbxNode)
 
             animationName = self.asset.getAnimationsPath() + '/' + 'BlenShapeAnim'
             if blendShapeIdx > 0:
                 animationName += '_' + str(blendShapeIdx)
             if self.verbose:
-                print 'Animation:', animationName
+                print('Animation: ' + animationName)
             blendShapeIdx += 1
 
             usdSkelAnim = UsdSkel.Animation.Define(self.usdStage, animationName)
@@ -1193,15 +1207,6 @@ class FbxConverter:
                 print("  converting to Y-up, odd-forward, and right-handed axis system")
             axisSystem.ConvertScene(self.fbxScene)
 
-        systemUnit = self.fbxScene.GetGlobalSettings().GetSystemUnit()
-        if systemUnit != fbx.FbxSystemUnit.cm: # cm is default for USD and FBX
-            fbxMetersPerUnit = 0.01
-            metersPerUnit = systemUnit.GetScaleFactor() * fbxMetersPerUnit
-            if self.legacyModifier is not None and self.legacyModifier.getMetersPerUnit() == 0:
-                self.legacyModifier.setMetersPerUnit(metersPerUnit)
-            else:
-                self.usdStage.SetMetadata("metersPerUnit", metersPerUnit)
-
         self.processMaterials()
         self.processSkinning()
         self.prepareAnimations()
@@ -1214,12 +1219,12 @@ class FbxConverter:
         return self.usdStage
 
 
-def usdStageWithFbx(fbxPath, usdPath, legacyModifier, copyTextures, searchPaths, verbose):
+def usdStageWithFbx(fbxPath, usdPath, legacyModifier, openParameters):
     if usdStageWithFbxLoaded == False:
         return None
 
     try:
-        fbxConverter = FbxConverter(fbxPath, usdPath, legacyModifier, copyTextures, searchPaths, verbose)
+        fbxConverter = FbxConverter(fbxPath, usdPath, legacyModifier, openParameters)
         return fbxConverter.makeUsdStage()
     except ConvertError:
         return None

@@ -8,9 +8,6 @@ class TermColors:
     FAIL = '\033[91m'
     END = '\033[0m'
 
-def _Print(stream, msg):
-    print >>stream, msg
-
 def _Err(msg):
     sys.stderr.write(TermColors.FAIL + msg + TermColors.END + '\n')
 
@@ -310,7 +307,7 @@ def validateMaterial(materialPrim, verbose, errorData):
     connect = UsdShade.ConnectableAPI.GetConnectedSource(surface)
     if not validateConnection(surface, connect, verboseOutput, errorData):
         return False
-    if connect is None or not connect[0].IsShader():
+    if connect is None or not connect[0].IsContainer():
         # Empty material is valid
         return True
 
